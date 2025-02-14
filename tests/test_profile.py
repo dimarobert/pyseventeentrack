@@ -203,7 +203,7 @@ async def test_summary(aresponses):
         assert summary["In Transit"] == 6
         assert summary["Not Found"] == 2
         assert summary["Ready to be Picked Up"] == 0
-        assert summary["Returned"] == 0
+        assert summary["Alert"] == 0
         assert summary["Undelivered"] == 0
         assert summary["Unknown"] == 3
 
