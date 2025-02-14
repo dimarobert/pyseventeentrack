@@ -245,7 +245,7 @@ PACKAGE_STATUS_MAP: Dict[int, str] = {
     30: "Ready to be Picked Up",
     35: "Undelivered",
     40: "Delivered",
-    50: "Returned",
+    50: "Alert",
 }
 
 PACKAGE_TYPE_MAP: Dict[int, str] = {
