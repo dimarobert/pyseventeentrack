@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "pyseventeentrack"
-version = "1.0.2"
+version = "1.1.0"
 description = "A Simple Python API for 17track.net"
 readme = "README.md"
 authors = ["Shai Ungar <shaiungar@gmail.com>"]
@@ -14,9 +14,8 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -26,6 +25,7 @@ aiohttp = ">=3.9.5"
 attrs = ">=19.3"
 python = "^3.9.0"
 pytz = ">=2021.1"
+cryptography = ">=45.0.4"
 
 [tool.poetry.dev-dependencies]
 aresponses = "^3.0.0"
