@@ -286,17 +286,22 @@ class Package:  # pylint: disable=too-few-public-methods,too-many-instance-attri
 
         if self.timestamp is not None:
             tz = timezone(self.tz)
-            try:
-                timestamp = tz.localize(
-                    datetime.strptime(self.timestamp, "%Y-%m-%d %H:%M")
-                )
-            except ValueError:
+            if isinstance(self.timestamp, datetime):
+                timestamp = self.timestamp
+                if timestamp.tzinfo is None:
+                    timestamp = tz.localize(timestamp)
+            else:
                 try:
                     timestamp = tz.localize(
-                        datetime.strptime(self.timestamp, "%Y-%m-%d %H:%M:%S")
+                        datetime.strptime(self.timestamp, "%Y-%m-%d %H:%M")
                     )
                 except ValueError:
-                    timestamp = datetime(1970, 1, 1, tzinfo=UTC)
+                    try:
+                        timestamp = tz.localize(
+                            datetime.strptime(self.timestamp, "%Y-%m-%d %H:%M:%S")
+                        )
+                    except ValueError:
+                        timestamp = datetime(1970, 1, 1, tzinfo=UTC)
 
             if self.tz != "UTC":
                 timestamp = timestamp.astimezone(UTC)
