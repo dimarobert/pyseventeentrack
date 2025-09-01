@@ -80,13 +80,22 @@ class Profile:
             if last_event_raw:
                 event = json.loads(last_event_raw)
 
+            timestamp = event.get("a")
+            dd = event.get("dd")
+            if dd:
+                try:
+                    dt_str = f"{dd['d']}T{dd['t']}{dd['tz']}"
+                    timestamp = datetime.fromisoformat(dt_str)
+                except Exception:
+                    pass
+
             kwargs: dict = {
                 "id": package.get("FTrackInfoId"),
                 "destination_country": package.get("FSecondCountry", 0),
                 "friendly_name": package.get("FRemark"),
                 "info_text": event.get("z"),
                 "location": " ".join([event.get("c", ""), event.get("d", "")]).strip(),
-                "timestamp": event.get("a"),
+                "timestamp": timestamp,
                 "tz": tz,
                 "origin_country": package.get("FFirstCountry", 0),
                 "package_type": package.get("FTrackStateType", 0),
