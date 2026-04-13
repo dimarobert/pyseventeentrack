@@ -5,7 +5,7 @@ import logging
 from typing import Callable, Coroutine, List, Optional, Union
 
 from .encrypt import rsa_encrypt
-from .errors import InvalidTrackingNumberError, RequestError
+from .errors import InvalidTrackingNumberError, NotLoggedInError, RequestError
 from .package import PACKAGE_STATUS_MAP, Package
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
@@ -73,6 +73,12 @@ class Profile:
 
         _LOGGER.debug("Packages response: %s", packages_resp)
 
+        code = (packages_resp or {}).get("Code", 0)
+        if code != 0:
+            raise NotLoggedInError(
+                f"Not logged in (Code: {code}, Message: {(packages_resp or {}).get('Message')})"
+            )
+
         packages: List[Package] = []
         for package in (packages_resp or {}).get("Json") or []:
             event: dict = {}
@@ -109,6 +115,12 @@ class Profile:
         )
 
         _LOGGER.debug("Summary response: %s", summary_resp)
+
+        code = (summary_resp or {}).get("Code", 0)
+        if code != 0:
+            raise NotLoggedInError(
+                f"Not logged in (Code: {code}, Message: {(summary_resp or {}).get('Message')})"
+            )
 
         results: dict = {}
         for kind in ((summary_resp or {}).get("Json") or {}).get("eitem", []):
