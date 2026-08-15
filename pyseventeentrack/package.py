@@ -305,7 +305,6 @@ class Package:  # pylint: disable=too-few-public-methods,too-many-instance-attri
                     except ValueError:
                         timestamp = datetime(1970, 1, 1, tzinfo=UTC)
 
-            if self.tz != "UTC":
-                timestamp = timestamp.astimezone(UTC)
+            timestamp = timestamp.astimezone(UTC)
 
             object.__setattr__(self, "timestamp", timestamp)
