@@ -102,6 +102,8 @@ async def test_packages(aresponses):
         assert packages[1].location == "Spain"
         assert packages[2].location == "Milano Italy"
         assert packages[3].location == ""
+        assert packages[5].timestamp.isoformat() == "2019-02-26T01:05:34+00:00"
+        assert packages[6].timestamp.isoformat() == "2019-02-26T01:05:34+00:00"
 
 
 @pytest.mark.asyncio
