@@ -98,7 +98,7 @@ class Profile:
             dd = event.get("dd")
             if dd:
                 try:
-                    dt_str = f"{dd['d']}T{dd['t']}{dd['tz']}"
+                    dt_str = f"{dd['d']}T{dd['t']}{dd.get('tz') or ''}"
                     timestamp = datetime.fromisoformat(dt_str)
                 except (KeyError, ValueError, TypeError):
                     pass
