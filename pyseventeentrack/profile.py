@@ -3,6 +3,7 @@
 import json
 import logging
 from typing import Callable, Coroutine, List, Optional, Union
+from datetime import datetime
 
 from .encrypt import rsa_encrypt
 from .errors import InvalidTrackingNumberError, RequestError
@@ -86,7 +87,7 @@ class Profile:
                 try:
                     dt_str = f"{dd['d']}T{dd['t']}{dd['tz']}"
                     timestamp = datetime.fromisoformat(dt_str)
-                except Exception:
+                except (KeyError, ValueError, TypeError):
                     pass
 
             kwargs: dict = {
