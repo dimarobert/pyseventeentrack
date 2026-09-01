@@ -126,9 +126,12 @@ async def test_packages_timezones(aresponses):
         client = Client(session=session)
         await client.profile.login(TEST_EMAIL, TEST_PASSWORD)
         packages = await client.profile.packages()
-        assert len(packages) == 2
+        assert len(packages) == 5
         assert packages[0].timestamp.isoformat() == "2019-02-26T15:05:34+00:00"
         assert packages[1].timestamp.isoformat() == "2019-02-26T15:05:34+00:00"
+        assert packages[2].timestamp.isoformat() == "2019-02-26T15:05:34+00:00"
+        assert packages[3].timestamp.isoformat() == "2019-02-26T15:05:34+00:00"
+        assert packages[4].timestamp.isoformat() == "2019-02-26T15:05:34+00:00"
 
 @pytest.mark.asyncio
 async def test_packages_paginates(aresponses):
