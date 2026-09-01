@@ -1,7 +1,7 @@
 """Define a simple structure for a package."""
 
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import attr
 from pytz import UTC, timezone
