@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Callable, Coroutine, List, Optional, Tuple, Union
+from typing import Callable, Coroutine, List, Optional, Set, Tuple, Union
 from datetime import datetime
 
 from .encrypt import rsa_encrypt
@@ -19,6 +19,8 @@ _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 API_URL_BUYER: str = "https://buyer.17track.net/orderapi/call"
 API_URL_USER: str = "https://user.17track.net/user-api/v1/sign-in-by-password"
+PACKAGES_PER_PAGE: int = 40
+MAX_PACKAGE_PAGES: int = 100
 
 
 class Profile:
@@ -60,64 +62,114 @@ class Profile:
         tz: str = "UTC",
     ) -> list:
         """Get the list of packages associated with the account."""
-        packages_resp: dict = await self._request(
-            "post",
-            API_URL_BUYER,
-            json={
-                "version": "1.0",
-                "method": "GetTrackInfoList",
-                "param": {
-                    "IsArchived": show_archived,
-                    "Item": "",
-                    "Page": 1,
-                    "PerPage": 40,
-                    "PackageState": package_state,
-                    "Sequence": "0",
+        packages: List[Package] = []
+        seen_page_signatures: Set[Tuple[Tuple[Optional[str], str], ...]] = set()
+        total_count: Optional[int] = None
+        page = 1
+        while True:
+            packages_resp: dict = await self._request(
+                "post",
+                API_URL_BUYER,
+                json={
+                    "version": "1.0",
+                    "method": "GetTrackInfoList",
+                    "param": {
+                        "IsArchived": show_archived,
+                        "Item": "",
+                        "Page": page,
+                        "PerPage": PACKAGES_PER_PAGE,
+                        "PackageState": package_state,
+                        "Sequence": "0",
+                    },
+                    "sourcetype": 0,
                 },
-                "sourcetype": 0,
-            },
-        )
-
-        _LOGGER.debug("Packages response: %s", packages_resp)
-
-        code = (packages_resp or {}).get("Code", 0)
-        if code != 0:
-            raise NotLoggedInError(
-                f"Not logged in (Code: {code}, Message: "
-                f"{(packages_resp or {}).get('Message')})"
             )
 
-        packages: List[Package] = []
-        for package in (packages_resp or {}).get("Json") or []:
-            event: dict = {}
-            last_event_raw: str = package.get("FLastEvent")
-            if last_event_raw:
-                event = json.loads(last_event_raw)
+            _LOGGER.debug("Packages response: %s", packages_resp)
 
-            timestamp = event.get("a")
-            dd = event.get("dd")
-            if dd:
-                try:
-                    dt_str = f"{dd['d']}T{dd['t']}{dd.get('tz') or ''}"
-                    timestamp = datetime.fromisoformat(dt_str)
-                except (KeyError, ValueError, TypeError):
-                    pass
+            code = (packages_resp or {}).get("Code", 0)
+            if code != 0:
+                raise NotLoggedInError(
+                    f"Not logged in (Code: {code}, Message: "
+                    f"{(packages_resp or {}).get('Message')})"
+                )
 
-            kwargs: dict = {
-                "id": package.get("FTrackInfoId"),
-                "destination_country": package.get("FSecondCountry", 0),
-                "friendly_name": package.get("FRemark"),
-                "info_text": event.get("z"),
-                "location": " ".join([event.get("c", ""), event.get("d", "")]).strip(),
-                "timestamp": timestamp,
-                "tz": tz,
-                "first_carrier": package.get("FFirstCarrier") or 0,
-                "origin_country": package.get("FFirstCountry", 0),
-                "package_type": package.get("FTrackStateType", 0),
-                "second_carrier": package.get("FSecondCarrier") or 0,
-                "status": package.get("FPackageState", 0),
-            }
-            packages.append(Package(package["FTrackNo"], **kwargs))
+            rows = (packages_resp or {}).get("Json") or []
+            if not rows:
+                break
+
+            page_signature = tuple(
+                (package.get("FTrackInfoId"), package["FTrackNo"]) for package in rows
+            )
+            if page_signature in seen_page_signatures:
+                _LOGGER.warning(
+                    "Stopping package pagination because page %s repeated package IDs",
+                    page,
+                )
+                break
+            seen_page_signatures.add(page_signature)
+
+            for package in rows:
+                event: dict = {}
+                if package.get("FLastEvent"):
+                    event = json.loads(package["FLastEvent"])
+
+                timestamp = event.get("a")
+                dd = event.get("dd")
+                if dd:
+                    try:
+                        dt_str = f"{dd['d']}T{dd['t']}{dd.get('tz') or ''}"
+                        timestamp = datetime.fromisoformat(dt_str)
+                    except (KeyError, ValueError, TypeError):
+                        pass
+                        
+                kwargs: dict = {
+                    "id": package.get("FTrackInfoId"),
+                    "destination_country": package.get("FSecondCountry", 0),
+                    "friendly_name": package.get("FRemark"),
+                    "info_text": event.get("z"),
+                    "location": " ".join(
+                        [event.get("c", ""), event.get("d", "")]
+                    ).strip(),
+                    "timestamp": timestamp,
+                    "tz": tz,
+                    "first_carrier": package.get("FFirstCarrier") or 0,
+                    "origin_country": package.get("FFirstCountry", 0),
+                    "package_type": package.get("FTrackStateType", 0),
+                    "second_carrier": package.get("FSecondCarrier") or 0,
+                    "status": package.get("FPackageState", 0),
+                }
+                packages.append(Package(package["FTrackNo"], **kwargs))
+
+            if total_count is None:
+                total_count = ((packages_resp or {}).get("pageInfo") or {}).get(
+                    "TotalCount"
+                ) or None
+            if len(rows) < PACKAGES_PER_PAGE and (
+                total_count is None or len(packages) >= total_count
+            ):
+                if total_count is None:
+                    _LOGGER.debug(
+                        "Stopping package pagination on page %s because TotalCount "
+                        "is unavailable and the page returned %s of %s requested "
+                        "packages",
+                        page,
+                        len(rows),
+                        PACKAGES_PER_PAGE,
+                    )
+                break
+            if page >= MAX_PACKAGE_PAGES:
+                _LOGGER.warning(
+                    "Stopping package pagination after %s pages",
+                    MAX_PACKAGE_PAGES,
+                )
+                break
+            if total_count is None:
+                _LOGGER.debug(
+                    "Continuing package pagination after full page %s without TotalCount",
+                    page,
+                )
+            page += 1
 
         return packages
 

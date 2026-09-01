@@ -4,6 +4,7 @@
 # grows past pylint's 1000-line default as API surfaces are added.
 # pylint: disable=too-many-lines
 
+import logging
 import re
 
 import aiohttp
@@ -104,6 +105,278 @@ async def test_packages(aresponses):
         assert packages[3].location == ""
         assert packages[5].timestamp.isoformat() == "2019-02-26T01:05:34+00:00"
         assert packages[6].timestamp.isoformat() == "2019-02-26T01:05:34+00:00"
+
+
+@pytest.mark.asyncio
+async def test_packages_paginates(aresponses):
+    """Test using the first reported total when a later page omits it."""
+    aresponses.add(
+        "user.17track.net",
+        "/user-api/v1/sign-in-by-password",
+        "post",
+        aresponses.Response(
+            text=load_fixture("authentication_success_response.json"), status=200
+        ),
+    )
+    aresponses.add(
+        "buyer.17track.net",
+        "/orderapi/call",
+        "post",
+        aresponses.Response(
+            text=load_fixture("packages_response_page_1.json"), status=200
+        ),
+        body_pattern=re.compile(r'.*"Page": 1.*"PerPage": 40.*'),
+    )
+    aresponses.add(
+        "buyer.17track.net",
+        "/orderapi/call",
+        "post",
+        aresponses.Response(
+            text=load_fixture("packages_response_page_2.json"), status=200
+        ),
+        body_pattern=re.compile(r'.*"Page": 2.*"PerPage": 40.*'),
+    )
+
+    async with aiohttp.ClientSession() as session:
+        client = Client(session=session)
+        await client.profile.login(TEST_EMAIL, TEST_PASSWORD)
+        packages = await client.profile.packages()
+        assert [package.tracking_number for package in packages] == [
+            "FIRST-PAGE-TRACKING",
+            "SECOND-PAGE-TRACKING",
+        ]
+        assert packages[1].first_carrier == 123
+        assert packages[1].second_carrier == 222
+        aresponses.assert_plan_strictly_followed()
+
+
+@pytest.mark.asyncio
+async def test_packages_continues_after_full_page_with_small_total_count(
+    aresponses, monkeypatch
+):
+    """Test that a full page continues when TotalCount may mean page count."""
+    monkeypatch.setattr("pyseventeentrack.profile.PACKAGES_PER_PAGE", 5)
+    aresponses.add(
+        "user.17track.net",
+        "/user-api/v1/sign-in-by-password",
+        "post",
+        aresponses.Response(
+            text=load_fixture("authentication_success_response.json"), status=200
+        ),
+    )
+    aresponses.add(
+        "buyer.17track.net",
+        "/orderapi/call",
+        "post",
+        aresponses.Response(text=load_fixture("packages_response.json"), status=200),
+        body_pattern=re.compile(r'.*"Page": 1.*"PerPage": 5.*'),
+    )
+    aresponses.add(
+        "buyer.17track.net",
+        "/orderapi/call",
+        "post",
+        aresponses.Response(
+            text=load_fixture("packages_response_empty.json"), status=200
+        ),
+        body_pattern=re.compile(r'.*"Page": 2.*"PerPage": 5.*'),
+    )
+
+    async with aiohttp.ClientSession() as session:
+        client = Client(session=session)
+        await client.profile.login(TEST_EMAIL, TEST_PASSWORD)
+        packages = await client.profile.packages()
+        assert len(packages) == 5
+        aresponses.assert_plan_strictly_followed()
+
+
+@pytest.mark.asyncio
+async def test_packages_continues_after_full_page_without_total_count(
+    aresponses, monkeypatch, caplog
+):
+    """Test continuing after a full page when no total count is available."""
+    monkeypatch.setattr("pyseventeentrack.profile.PACKAGES_PER_PAGE", 1)
+    aresponses.add(
+        "user.17track.net",
+        "/user-api/v1/sign-in-by-password",
+        "post",
+        aresponses.Response(
+            text=load_fixture("authentication_success_response.json"), status=200
+        ),
+    )
+    aresponses.add(
+        "buyer.17track.net",
+        "/orderapi/call",
+        "post",
+        aresponses.Response(
+            text=load_fixture("packages_response_missing_id.json"), status=200
+        ),
+        body_pattern=re.compile(r'.*"Page": 1.*"PerPage": 1.*'),
+    )
+    aresponses.add(
+        "buyer.17track.net",
+        "/orderapi/call",
+        "post",
+        aresponses.Response(
+            text=load_fixture("packages_response_empty.json"), status=200
+        ),
+        body_pattern=re.compile(r'.*"Page": 2.*"PerPage": 1.*'),
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="pyseventeentrack.profile"):
+        async with aiohttp.ClientSession() as session:
+            client = Client(session=session)
+            await client.profile.login(TEST_EMAIL, TEST_PASSWORD)
+            packages = await client.profile.packages()
+
+    assert [package.tracking_number for package in packages] == ["1234567890987654321"]
+    assert "Continuing package pagination after full page 1 without TotalCount" in (
+        caplog.text
+    )
+    aresponses.assert_plan_strictly_followed()
+
+
+@pytest.mark.asyncio
+async def test_packages_counts_received_rows(aresponses):
+    """Test pagination without assuming every previous page was full."""
+    aresponses.add(
+        "user.17track.net",
+        "/user-api/v1/sign-in-by-password",
+        "post",
+        aresponses.Response(
+            text=load_fixture("authentication_success_response.json"), status=200
+        ),
+    )
+    for page in range(1, 4):
+        aresponses.add(
+            "buyer.17track.net",
+            "/orderapi/call",
+            "post",
+            aresponses.Response(
+                text=load_fixture(f"packages_response_partial_page_{page}.json"),
+                status=200,
+            ),
+            body_pattern=re.compile(rf'.*"Page": {page}.*"PerPage": 40.*'),
+        )
+
+    async with aiohttp.ClientSession() as session:
+        client = Client(session=session)
+        await client.profile.login(TEST_EMAIL, TEST_PASSWORD)
+        packages = await client.profile.packages()
+        assert [package.tracking_number for package in packages] == [
+            "PARTIAL-PAGE-1",
+            "PARTIAL-PAGE-2A",
+            "PARTIAL-PAGE-2B",
+            "PARTIAL-PAGE-3",
+        ]
+        aresponses.assert_plan_strictly_followed()
+
+
+@pytest.mark.asyncio
+async def test_packages_stops_on_empty_page(aresponses):
+    """Test stopping pagination when the API returns an empty page."""
+    aresponses.add(
+        "user.17track.net",
+        "/user-api/v1/sign-in-by-password",
+        "post",
+        aresponses.Response(
+            text=load_fixture("authentication_success_response.json"), status=200
+        ),
+    )
+    aresponses.add(
+        "buyer.17track.net",
+        "/orderapi/call",
+        "post",
+        aresponses.Response(
+            text=load_fixture("packages_response_large_total.json"), status=200
+        ),
+        body_pattern=re.compile(r'.*"Page": 1.*"PerPage": 40.*'),
+    )
+    aresponses.add(
+        "buyer.17track.net",
+        "/orderapi/call",
+        "post",
+        aresponses.Response(
+            text=load_fixture("packages_response_empty_page.json"), status=200
+        ),
+        body_pattern=re.compile(r'.*"Page": 2.*"PerPage": 40.*'),
+    )
+
+    async with aiohttp.ClientSession() as session:
+        client = Client(session=session)
+        await client.profile.login(TEST_EMAIL, TEST_PASSWORD)
+        packages = await client.profile.packages()
+        assert [package.tracking_number for package in packages] == [
+            "FIRST-PAGE-TRACKING"
+        ]
+        aresponses.assert_plan_strictly_followed()
+
+
+@pytest.mark.asyncio
+async def test_packages_stops_at_maximum_page(aresponses, monkeypatch):
+    """Test bounding requests when distinct pages exceed the configured limit."""
+    monkeypatch.setattr("pyseventeentrack.profile.MAX_PACKAGE_PAGES", 2)
+    aresponses.add(
+        "user.17track.net",
+        "/user-api/v1/sign-in-by-password",
+        "post",
+        aresponses.Response(
+            text=load_fixture("authentication_success_response.json"), status=200
+        ),
+    )
+    for page, fixture in enumerate(
+        ("packages_response_large_total.json", "packages_response_partial_page_2.json"),
+        start=1,
+    ):
+        aresponses.add(
+            "buyer.17track.net",
+            "/orderapi/call",
+            "post",
+            aresponses.Response(text=load_fixture(fixture), status=200),
+            body_pattern=re.compile(rf'.*"Page": {page}.*"PerPage": 40.*'),
+        )
+
+    async with aiohttp.ClientSession() as session:
+        client = Client(session=session)
+        await client.profile.login(TEST_EMAIL, TEST_PASSWORD)
+        packages = await client.profile.packages()
+        assert [package.tracking_number for package in packages] == [
+            "FIRST-PAGE-TRACKING",
+            "PARTIAL-PAGE-2A",
+            "PARTIAL-PAGE-2B",
+        ]
+        aresponses.assert_plan_strictly_followed()
+
+
+@pytest.mark.asyncio
+async def test_packages_stops_on_repeated_page(aresponses):
+    """Test stopping without appending packages when the API repeats a page."""
+    aresponses.add(
+        "user.17track.net",
+        "/user-api/v1/sign-in-by-password",
+        "post",
+        aresponses.Response(
+            text=load_fixture("authentication_success_response.json"), status=200
+        ),
+    )
+    for page in range(1, 3):
+        aresponses.add(
+            "buyer.17track.net",
+            "/orderapi/call",
+            "post",
+            aresponses.Response(
+                text=load_fixture("packages_response_large_total.json"), status=200
+            ),
+            body_pattern=re.compile(rf'.*"Page": {page}.*"PerPage": 40.*'),
+        )
+
+    async with aiohttp.ClientSession() as session:
+        client = Client(session=session)
+        await client.profile.login(TEST_EMAIL, TEST_PASSWORD)
+        packages = await client.profile.packages()
+        assert [package.tracking_number for package in packages] == [
+            "FIRST-PAGE-TRACKING",
+        ]
+        aresponses.assert_plan_strictly_followed()
 
 
 @pytest.mark.asyncio
